@@ -5,18 +5,14 @@ A Python module for locality senstive hashing based on <a href="https://www.goog
 Still very much a work-in-progress. 
 
 TODO:
-<ul>
-  <li>Add hdf5 storage via h5py</li>
-  <li>Add sql storage via sqlite3</li>
-  <li>Add support for data supplied as bytes (memory/mmap), ie sequence data</li>
-  <li>Switch to using `randomkit` from `numpy` instead of `rand` from `stdlib`
-  <li>Write all the tests. Test all the things.</li>
-  <li>Demos
-    <ul>
-      <li>lsh for denstity-based clustering (as a fast approximation for kNN problem in OPTICS algorithm)</li>
-      <li>lsh accelerated multiple alignment</li>
-      <li>lsh for classification</li>
-      <li>lsh for estimating mutual information</li>
-      <li>pretty much scaling any kNN based algorithm to large data space</li>
-     </ul>
-   </li>
+* Add hdf5 storage via h5py
+* Add sql storage via sqlite3
+* Add support for data supplied as bytes (memory/mmap), ie sequence data
+* Switch to using `randomkit` from `numpy` instead of `rand` from `stdlib`
+* Write all the tests! Test all the things!
+* Demos
+  * lsh for denstity-based clustering (as a fast approximation for kNN problem in OPTICS algorithm)
+  * lsh accelerated multiple alignment
+  * lsh for classification
+  * lsh for estimating mutual information
+  * pretty much scaling any kNN based algorithm to large data space
