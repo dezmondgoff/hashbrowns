@@ -1171,6 +1171,8 @@ def cdist(XA, XB, metric='euclidean', p=None, V=None, VI=None, w=None,
     VI : ndarray, optional
         The inverse of the covariance matrix
         Only for Mahalanobis. Default: inv(cov(vstack([XA, XB]).T)).T
+    out : ndarray, optional
+        If not None, the distance matrix Y is stored in this array
 
     Returns
     -------
@@ -1442,8 +1444,10 @@ def cdist(XA, XB, metric='euclidean', p=None, V=None, VI=None, w=None,
     n = s[1]
     if out is None:
         dm = np.zeros((mA, mB), dtype=np.double)
-    elif out.shape != (mA, mB):
+    else:
+      if out.shape != (mA, mB):
         raise ValueError("Output array has wrong dimension.")
+      dm = out  
 
     # validate input for multi-args metrics
     if(metric in ['minkowski', 'mi', 'm', 'pnorm', 'test_minkowski'] or
