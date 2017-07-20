@@ -3,7 +3,7 @@
 """
 Created on Wed Apr 26 12:11:53 2017
 
-@author: root
+@author: dezmond
 """
 
 cimport numpy as np
