@@ -23,7 +23,7 @@ blosum62 = blosum62()
 pam250 = pam250()
 
 def _convert_to_str(x):
-    return np.ascontiguousarray(x, np.string_)
+    return np.ascontiguousarray(x, np.object_)
 
 def _validate_ouput(x, y, out):
     size = x.shape[0] * y.shape[0]
@@ -164,7 +164,7 @@ def cdist_wrapped(x, y, mstr, p=None, w=None, VI=None, V=None, gap_open=None,
             _alignment_wrap.cdist_alignment_wrap(x, y, dm, gap_open, gap_ext, 
                                                  mat)                               
     else:
-        return cdist(x, y, mstr, p, w, VI, V)
+        return cdist(x, y, mstr, p, w, VI, V, dm)
 
 def ssdist_wrapped(x, y, indices_x, indices_y, indptr, mstr,  p=None, w=None, 
                    VI=None, V=None, gap_open=None, gap_ext=None, mat=None, 
