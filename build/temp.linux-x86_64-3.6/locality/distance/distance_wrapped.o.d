@@ -1,0 +1,3 @@
+commandline: -I/usr/lib/python3.6/site-packages/numpy/core/include -I. -I/usr/include/python3.6m -c-O3 -Wall-I/usr/lib/python3.6/site-packages/numpy/core/include -I. -I/usr/include/python3.6m
+commandline: -I/usr/lib/python3.6/site-packages/numpy/core/include -I. -I/usr/include/python3.6m -c-O3 -Wall -march=native -mfpmath=sse-I/usr/lib/python3.6/site-packages/numpy/core/include -I. -I/usr/include/python3.6m
+commandline: -I/usr/lib/python3.6/site-packages/numpy/core/include -I. -I/usr/include/python3.6m -c-O3 -Wall -march=native -mfpmath=sse-I/usr/lib/python3.6/site-packages/numpy/core/include -I. -I/usr/include/python3.6m
