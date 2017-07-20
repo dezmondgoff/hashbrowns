@@ -12,6 +12,7 @@ TODO:
 * Write all the tests! Test all the things!
   * Test all data and storage structures
   * Test alignment distance extension functions for correctness
+* Add kmedoids/kmeans algorithm(s) (not extremely necessary, but nice for completeness)
 * Demos
   * lsh for denstity-based clustering (as a fast approximation for kNN problem in OPTICS algorithm)
   * lsh accelerated multiple alignment
