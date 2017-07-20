@@ -10,6 +10,8 @@ TODO:
 * Add support for data supplied as bytes (memory/mmap), ie sequence data
 * Switch to using `randomkit` from `numpy` instead of `rand` from `stdlib`
 * Write all the tests! Test all the things!
+  * Test all data and storage structures
+  * Test alignment distance extension functions for correctness
 * Demos
   * lsh for denstity-based clustering (as a fast approximation for kNN problem in OPTICS algorithm)
   * lsh accelerated multiple alignment
