@@ -5,8 +5,8 @@ A Python module for locality senstive hashing based on <a href="https://www.goog
 Still very much a work-in-progress. 
 
 TODO:
-* Add hdf5 storage via h5py
-* Add sql storage via sqlite3
+* Add hdf5 data/storage via h5py
+* Add sql data via sqlite3
 * Add support for data supplied as bytes (memory/mmap), ie sequence data
 * Switch to using `randomkit` from `numpy` instead of `rand` from `stdlib`
 * Write all the tests! Test all the things!
