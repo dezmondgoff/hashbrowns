@@ -6,13 +6,17 @@ Created on Sat Apr 29 23:04:21 2017
 @author: root
 """
 
-# build script for 'locality'
+# build script for 'hashbrowns'
 
-import sys, os
+import sys
+import os
+import re
 from distutils.core import setup
 from distutils.extension import Extension
 from Cython.Build import cythonize
-from numpy.distutils.misc_util import get_numpy_include_dirs
+from numpy.distutils.misc_util import get_numpy_include_dirs, get_mathlibs
+from distutils.msvccompiler import get_build_version as get_msvc_build_version
+
 
 numpyIncludeDir = get_numpy_include_dirs()
 
@@ -25,7 +29,7 @@ except:
     sys.exit(1)
 
 
-# scan the 'locality' directory for extension files, converting
+# scan the 'hashbrowns' directory for extension files, converting
 # them to extension names in dotted notation
 def scandir(dir, ext, files=[]):
     for file in os.listdir(dir):
@@ -36,66 +40,85 @@ def scandir(dir, ext, files=[]):
             scandir(path, ext, files)
     return files
 
-def getIncludes(extPaths, crossReference=[], files=[]):
-    remove = "<>\""
-    if not extPaths:
-        return files
+def get_depends(topdir, fids, header_names=[], out=set()):
+    if not fids:
+        return [os.path.join(topdir, x) for x in out]
     to_visit = []
-    for path in extPaths:
-        with open(path) as f:
+    for filename in fids:
+        with open(os.path.join(topdir, filename)) as f:
             for line in f:
-                if line.startswith("#include"):
-                    name = line[9:]
-                    for char in remove:
-                        name.strip(char)
-                    for h in crossReference:
-                        h_name = h.split(os.path.sep)[-1]
-                        if h_name == name:
-                            files.append(h)
-                            to_visit.append(h)
-    getIncludes(to_visit, crossReference, files)
-                
+                if line.startswith(("#include ", "include ", "from",
+                                    "cdef extern from ")):
+                    if "<" in line:
+                        continue
+                    names = re.findall(r"['\"](.*?)['\"]", line)
+                    if not names:
+                        for x in re.findall(r"from (.*?) cimport", line):
+                            x += ".pxd"
+                            if os.path.isfile(os.path.join(topdir, x)):
+                                to_visit.append(x)
+                        continue
+                    new_filename = names[0]
+                    for header_name in header_names:
+                        if header_name == new_filename:
+                            out.add(header_name)
+                            to_visit.append(header_name)
+                            break
+    return get_depends(topdir, to_visit, header_names, out)
+
 # generate an Extension object from its dotted name
-def makeExtension(extName, file_ext):
-    extPath = extName.replace(".", os.path.sep) + file_ext
-    print(extPath)
+def makeExtension(ext_name, file_ext):
+    ext_path = ext_name.replace(".", os.path.sep) + file_ext
+    print(ext_path)
+    topdir = os.path.join(*(ext_path.split(os.path.sep)[:-1]))
+    header_names = [os.path.split(x)[-1] for x in scandir(topdir, ".h", [])]
+    sources = [ext_path]
+    libs = []
+    deps = []
+    defs = []
     if file_ext == ".c":
-        extName = ".".join(extName.split(".")[:-1] + 
-                           ["_" + extName.split(".")[-1]])
-        topdir = os.path.join(*(extPath.split(os.path.sep)[:-1]))
-        headerPaths = scandir(topdir, ".h")
-        deps = getIncludes([extPath], headerPaths, [])
+        ext_name = ".".join(ext_name.split(".")[:-1] +
+                           ["_" + ext_name.split(".")[-1]])
+        deps = get_depends(topdir, [os.path.split(ext_path)[-1]],
+                           header_names, set())
+    elif "mtrand" in ext_name:
+        sources = []
     else:
-        deps = []
+        deps = get_depends(topdir, [os.path.split(ext_path)[-1][:-3] + "pxd"],
+                           header_names, set())
+        sources += [x[:-1] + "c" for x in deps]
     return Extension(
-        extName,
-        sources = [extPath],
-        depends = deps,
-        include_dirs = numpyIncludeDir + ["."],   # adding the '.' to include_dirs is CRUCIAL!!
-        extra_compile_args = ["-O3", "-Wall", "-march=native","-mfpmath=sse"],
-        extra_link_args = ['-g'],
+        ext_name,
+        sources=sources,
+        libraries=libs,
+        depends=deps,
+        define_macros=defs,
+        include_dirs=numpyIncludeDir + ["."],
+        extra_compile_args=["-O3", "-Wall", "-march=native", "-mfpmath=sse"],
+        extra_link_args=["-g", "-C"],
         )
-    
+
 # get the list of extensions
-cy_extNames = [path.replace(os.path.sep, ".")[:-4] 
-               for path in scandir("locality", ".pyx", [])]
-c_extNames = [path.replace(os.path.sep, ".")[:-2]
-              for path in scandir("locality/distance", ".c", [])]
+cy_ext_names = [path.replace(os.path.sep, ".")[:-4]
+               for path in scandir("hashbrowns", ".pyx", [])]
+c_ext_names = [path.replace(os.path.sep, ".")[:-2]
+              for path in scandir("hashbrowns/_distance", ".c", [])]
 # and build up the set of Extension objects
-cy_extensions = [makeExtension(name, ".pyx") for name in cy_extNames]
-c_extensions = [makeExtension(name, ".c") for name in c_extNames]
+cy_extensions = [makeExtension(name, ".pyx") for name in cy_ext_names]
+c_extensions = [makeExtension(name, ".c") for name in c_ext_names]
 
 # finally, we can pass all this to distutils
 setup(
-      name="locality",
-      version = '1.0',
-      description = '''Multiprocessor enabled locality sensitive hashing for 
-                       large data sets.''',
-      author = 'Dezmond K. Goff',
-      author_email = 'goff.dezmond@gmail.com',
-      url = '',
-      long_description = '''''',
-      packages = ["locality", "locality.helpers", "locality.distance"],
-      ext_modules = cythonize(cy_extensions) + c_extensions,
-      cmdclass = {'build_ext': build_ext},
+      name="hashbrowns",
+      version='1.0',
+      description="Parallel locality-sensitive hashing for large metric "
+                  "spaces.",
+      author='Dezmond K. Goff',
+      author_email='goff.dezmond@gmail.com',
+      url='',
+      long_description='''''',
+      packages=["hashbrowns", "hashbrowns._random",
+                "hashbrowns._helpers", "hashbrowns._distance"],
+      ext_modules=cythonize(cy_extensions) + c_extensions,
+      cmdclass={'build_ext': build_ext},
 )
