@@ -16,14 +16,6 @@ Univariate distributions
 ==============================================================================
 stable               General stable distributions.
 ==============================================================================
-
-==============================================================================
-Internal functions
-==============================================================================
-retreive_state          Get rk_state from RandomState.
-return_state            Return rk_state to RandomState.
-==============================================================================
-
 """
 from __future__ import division, absolute_import, print_function
 

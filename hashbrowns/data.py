@@ -1,4 +1,4 @@
-# locality/data.py
+# hashbrowns/data.py
 
 import numpy as np
 import zipfile

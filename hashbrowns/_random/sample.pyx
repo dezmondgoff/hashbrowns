@@ -91,22 +91,35 @@ def sample_indices(npy_intp n, npy_intp m, npy_intp s, bint replace=False,
     """
     Take `m` samples of size `s` from the range of indices of a 1D array with 
     length `n`.
-
-    Args:
-        n (npy_intp): number of points in array
-        m (npy_intp): number of samples to be taken
-        s (npy_intp): number of indices in each sample
-        replace (boolean): set to sample with or without replacement
-        out (1D memoryview): if not None, output is stored in this array
-        rstate (optional, np.random.RandomState): random number generator, if 
-            None, functions uses RandomState generated on import of np.random
     
-    Returns:
+    Parameters
+    ----------
+    n : int
+        The size of the array to be indexed
+    m : int
+        The number of samples
+    s : int
+        The number of indices in each sample
+    out : ndarray, optional
+        The output array
+        If not None, output is stored in this array
+    replace : boolean
+        Sample with or without replacement. Defaults: False
+    rsi : optional, RandomStateInterface
+        A Cython interface to a Numpy random number generator 
+        Defaults: and interface to RandomState generated on import of np.random
+    
+    Returns
+    -------
+    out : ndarray
         An array of indices
     
-    Raises:
-        ValueError: if provided output array has incorrect shape
-        ValueError: if npy_intp is not np.int64 or np.int32
+    Raises
+    ------
+    ValueError
+        If provided output array has incorrect shape.
+    StandardError
+        If system npy_intp is not defined as 64 or 32-bit int. 
     """
     cdef rk_state * state
     
@@ -129,7 +142,7 @@ def sample_indices(npy_intp n, npy_intp m, npy_intp s, bint replace=False,
         elif np.intp is np.int32:
             rk_random_uint32(0, n, m * s, <npy_uint32 *> &out[0], state)
         else:
-            raise ValueError("This should not happen. Report as bug.")
+            raise Exception("This should not happen. Report as bug.")
 
         rsi.return_state()
         
@@ -141,19 +154,37 @@ def sample_intervals(npy_intp n, npy_intp k, npy_intp m, npy_intp s,
     """
     Take `m` samples of size 's' from non-overlapping intervals of size `k` 
     along a 1D array of length `n`.
-
-    Args:
-        n (npy_intp): number of points in array
-        k (npy_intp): size of intervals
-        m (npy_intp): number of samples to be taken from within each interval
-        s (npy_intp): number of indices in each sample
-        replace (boolean): set to sample with or without replacement
-        out (1D memoryview): if not None, output is stored in this array
-        rstate (optional, np.random.RandomState): random number generator, if 
-            None, functions uses RandomState generated on import of np.random
     
-    Returns:
+    Parameters
+    ----------
+    n : int
+        The size of the array to be indexed
+    k : int
+        The size of the intervals along the array
+    m : int
+        The number of samples per interval
+    s : int
+        The number of indices in each sample
+    out : ndarray, optional
+        The output array
+        If not None, output is stored in this array
+    replace : boolean
+        Sample with or without replacement. Defaults: False
+    rsi : optional, RandomStateInterface
+        A Cython interface to a Numpy random number generator 
+        Defaults: and interface to RandomState generated on import of np.random
+    
+    Returns
+    -------
+    out : ndarray
         An array of indices
+    
+    Raises
+    ------
+    ValueError
+        If provided output array has incorrect shape.
+    StandardError
+        If system npy_intp is not defined as 64 or 32-bit int. 
     """
     cdef rk_state * state
     cdef npy_intp el = n // k
@@ -179,7 +210,7 @@ def sample_intervals(npy_intp n, npy_intp k, npy_intp m, npy_intp s,
         elif np.intp is np.int32:
             c_sample_intervals_replace_32(n, k, el, m, s, &out[0], state)
         else:
-            raise ValueError("This should not happen. Report as bug.")
+            raise Exception("This should not happen. Report as bug.")
         
         rsi.return_state()
         

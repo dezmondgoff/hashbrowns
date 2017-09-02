@@ -1,0 +1,36 @@
+
+# byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# C extensions
+*.so
+
+# ignore .o, .a, and .d files
+*.[oad]
+
+# ignore tilde files i.e. logs
+*~
+
+# distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# eclipse
+.project
+.pydevproject
+.settings/
+
+# etc
+/hashbrowns/_random/mtrand

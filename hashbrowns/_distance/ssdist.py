@@ -23,12 +23,15 @@ import warnings
 from functools import partial
 from scipy._lib.six import callable, string_types
 from scipy._lib.six import xrange
-from scipy.spatial import distance
+from scipy.spatial.distance import *
 from scipy.sparse import csr_matrix
 
-import hashbrowns.distance._ssdist_wrap as _ssdist_wrap
-import hashbrowns.distance._alignment_wrap as _alignment_wrap
-from hashbrowns.distance.score_matrices import blosum62
+from .alignment import blosum62, levenshtein, needleman_wunsch, pam250
+from . import _ssdist_wrap
+from . import _alignment_wrap
+from .score_matrices import load_blosum62
+
+_blosum62 = load_blosum62()
 
 # load preset alignment matrices
 
@@ -79,73 +82,118 @@ def _convert_to_double(a, indices):
 
 def _convert_to_str(a, indices):
     assert(isinstance(a, np.ndarray))
-    if a.dtype != np.object:
+    if a.dtype != np.object and not np.issubdtype(a.dtype, np.str):
         if indices is None:
-            return np.ascontiguousarray(a, dtype=np.bool), indices
+            return np.ascontiguousarray(a, dtype="unicode"), indices
         else:
             unique, indices = np.unique(indices, return_inverse=True)
-            return np.ascontiguousarray(a[unique], dtype=str), indices
+            return np.ascontiguousarray(a[unique], dtype="unicode"), indices
     return a, indices
 
-def _validate_score_matrix(mat):
+def _validate_string_dtypes(a, b, indicesa, indicesb):
+    if a.dtype != b.dtype:
+        raise ValueError("String arrays must have the same dtype")
+    if a.dtype == np.object_:
+        if not np.all((isinstance(a[i], str) for i in indicesa)):
+            raise ValueError("All indexed objects in XA must be strings")
+        if not np.all((isinstance(b[i], str) for i in indicesb)):
+            raise ValueError("All indexed objects in XB must be strings")
+
+def _validate_alignment_args(gap_open, gap_ext, mat, normalized, tol):
+    if gap_open is None:
+        gap_open = 1
+    if gap_ext is None:
+        gap_ext = 1
+    if normalized is None:
+        normalized = False
+    elif normalized and tol is None:
+        tol = 1e-07
+
     if mat is None:
-        mat = blosum62
-    elif not isinstance(mat, dict):
+        return (gap_open, gap_ext, normalized, tol), None
+    mat, dtype = _validate_score_matrix(mat)
+    return (gap_open, gap_ext, mat, normalized, tol), dtype
+
+def _validate_score_matrix(mat):
+    if not isinstance(mat, dict):
         raise ValueError("Alignment matrix must be a dict object.")
-    return mat
-
-def _validate_alignment_args(gap_open, gap_ext, normalized):
-    if gap_open is None:
-        gap_open = 1
-    if gap_ext is None:
-        gap_ext = 1
-    if normalized is None:
-        normalized = False
-    return gap_open, gap_ext, normalized
-
-def _validate_preset_align_args(gap_open, gap_ext, normalized):
-    if gap_open is None:
-        gap_open = 1
-    if gap_ext is None:
-        gap_ext = 1
-    if normalized is None:
-        normalized = False
-    return gap_open, gap_ext, normalized
-
-def _validate_align_args(gap_open, gap_ext, smat, normalized):
-    if gap_open is None:
-        gap_open = 1
-    if gap_ext is None:
-        gap_ext = 1
-    if smat is None:
-        smat = blosum62
-    elif not isinstance(smat, dict):
-        raise ValueError("Alignment matrix must be a dict object.")
-    if normalized is None:
-        normalized = False
-    return gap_open, gap_ext, smat, normalized
+    matrix_dtype = next(iter(mat.items()))[1].__class__
+    if matrix_dtype not in [int, float]:
+        raise ValueError("Values must be integer or float types")
+    for k in mat:
+        if not isinstance(k, str) or len(k) != 2:
+            raise ValueError("Keys must two character strings")
+    for v in mat.values():
+        if not isinstance(v, matrix_dtype):
+            raise ValueError("Values must all be of the same type.")
+    return mat, matrix_dtype
 
 def _filter_deprecated_kwargs(**kwargs):
-    for k in ["p", "V", "w", "VI", "gap_open", "gap_ext", "smat"]:
+    for k in ["p", "V", "w", "VI", "gap_open", "gap_ext", "mat"]:
         kw = kwargs.pop(k, None)
         if kw is not None:
             warnings.warn("Got unexpected kwarg %s. This will raise an error"
                           " in a future version." % k, DeprecationWarning)
 
-def _ssdist_cosine(XA, XB, indicesA, indicesB, indptr, ssdm):
+def _ssdist_cosine(XA, XB, indicesA, indicesB, indptr, dm):
     uniqueA, reverseA = np.unique(indicesA, return_inverse=True)
     uniqueB, reverseB = np.unique(indicesB, return_inverse=True)
 
     num = np.diff(indptr)
-    np.einsum("ij, ij -> i", XA[indicesA].repeat(num),
-              XB[indicesB].T, out=ssdm)
+    np.einsum("ij, ij -> i", XA[indicesA].repeat(num), XB[indicesB], out=dm)
 
-    normsA = distance._row_norms(XA[uniqueA])
-    normsB = distance._row_norms(XB[uniqueB]).reshape(-1, 1)
-    ssdm /= normsA[reverseA].repeat(num)
-    ssdm /= normsB[reverseB]
-    ssdm *= -1
-    ssdm += 1
+    normsA = _row_norms(XA[uniqueA])
+    normsB = _row_norms(XB[uniqueB]).reshape(-1, 1)
+    dm /= normsA[reverseA].repeat(num)
+    dm /= normsB[reverseB]
+    dm *= -1
+    dm += 1
+
+def aitchison(u, v):
+    """
+    Computes the Aitchison distance between two 1-D arrays.
+
+    The Aitchison distance between `u` and `v`, defined as
+
+    .. math::
+
+       \\left(\\sum_{i < j}{(\\log\\left(\\frac{u_i}{u_j}\\right) -\\log\\left(\\frac{v_i}{v_j}\\right))^2)}\\right)^{1/2}.
+
+    Parameters
+    ----------
+    u : (N,) array_like
+        Input array.
+    v : (N,) array_like
+        Input array.
+
+    Returns
+    -------
+    wminkowski : double
+        The weighted Minkowski distance between vectors `u` and `v`.
+
+    """
+    u = _validate_vector(u)
+    v = _validate_vector(v)
+    # check positive
+    if not np.all(u >= 0):
+        raise ValueError("All values in u must be greater than or equal to "
+                         "zero.")
+    if not np.all(v >= 0):
+        raise ValueError("All values in XB must be greater than or equal to "
+                         "zero.")
+    # check if all values sum to 1
+    norm_u = u.sum()
+    norm_v = v.sum()
+    if not np.isclose(norm_u, 1):
+        u = (1 / norm_u) * u
+    if not np.isclose(norm_v, 1):
+        v = (1 / norm_v) * v
+    u = np.log(u)
+    v = np.log(v)
+    u -= u.mean()
+    v -= v.mean()
+    dist = norm(u - v)
+    return dist
 
 # Registry of "simple" distance metrics" pdist and cdist implementations,
 # meaning the ones that accept one dtype and have no additional arguments.
@@ -174,16 +222,45 @@ for wrap_name, names, typ in [
     for name in names:
         _SIMPLE_ssdist[name] = converter, ssdist_fn
 
-_METRICS_NAMES = ["braycurtis", "canberra", "chebyshev", "cityblock",
-                  "correlation", "cosine", "dice", "euclidean", "hamming",
-                  "jaccard", "kulsinski", "mahalanobis", "matching",
-                  "minkowski", "rogerstanimoto", "russellrao", "seuclidean",
-                  "sokalmichener", "sokalsneath", "sqeuclidean", "yule", "wminkowski"]
+# Registry of string distance metrics" pdist and cdist implementations,
+# meaning the ones that accept one dtype and have no additional arguments.
+_string_names = []
+_STRING_ssdist = {}
 
-_TEST_METRICS = {"test_" + name: eval("distance." + name) for name in _METRICS_NAMES}
+for wrap_name, names, has_dict in [
+    ("levenshtein", ["edit", "levenshtein"], False),
+    ("blosum62", ["blosum62", "blosum"], False),
+    ("pam250", ["pam250", "pam"], False),
+    ("needleman_wunsch", ["needleman_wunsch", "needleman-wunsch", "align",
+                          "alignment"], True)
+]:
+    _string_names.extend(names)
+
+    for typ in ["o", "s"]:
+        for mtyp in ["l", "d"] if has_dict else [None]:
+            fmt = ("%s_" % wrap_name,
+                   {"o": "pyobject_", "s": "str_"}[typ],
+                   {None:"", "l":"long_", "d":"double_"}[mtyp])
+            fn_name = "%s%s%swrap" % fmt
+            fn = getattr(_alignment_wrap, "%s_%s" % ("ssdist", fn_name))
+            for name in names:
+                _STRING_ssdist[(name, typ) +
+                               (mtyp,) if mtyp is not None else ()] = fn
+
+_METRICS_NAMES = ["aitchison", "braycurtis", "canberra", "chebyshev",
+                  "cityblock", "correlation", "cosine", "dice", "euclidean",
+                  "hamming", "jaccard", "kulsinski", "mahalanobis", "matching",
+                  "minkowski", "rogerstanimoto", "russellrao", "seuclidean",
+                  "sokalmichener", "sokalsneath", "sqeuclidean", "yule",
+                  "wminkowski"]
+
+_STRING_METRICS_NAMES = ["blosum62", "levenshtein", "needleman_wunsch", "pam250"]
+
+_TEST_METRICS = {"test_" + name: eval("" + name) for name in _METRICS_NAMES +
+                 _STRING_METRICS_NAMES}
 
 def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
-           V=None, VI=None, w=None, gap_open=None, gap_ext=None, smat=None,
+           V=None, VI=None, w=None, gap_open=None, gap_ext=None, mat=None,
            normalized=None, out=None):
     """
     Computes sparse submatrix of distances between within/between collections
@@ -257,7 +334,7 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
 
     4. ``Y = cdist(XA, XB, "seuclidean", V=None)``
 
-       Computes the standardized Euclidean distance. The standardized
+       Computes the standardized Euclidean  The standardized
        Euclidean distance between two n-vectors ``u`` and ``v`` is
 
        .. math::
@@ -397,6 +474,26 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
        Computes the weighted Minkowski distance between the
        vectors. (see `wminkowski` function documentation)
 
+    22. ``Y = cdist(..., "edit")``
+
+       Computes the edit distance between the strings.
+       (see `edit` function documentation)
+
+    22. ``Y = ssdist(..., "blosum")``
+
+       Computes a positive alignment distance between the strings
+       based on the blosum62 matrix.(see `blosum` function documentation)
+
+    22. ``Y = ssdist(..., "pam250")``
+
+       Computes a positive alignment distance between the strings
+       based on the pam250 matrix. (see `pam250` function documentation)
+
+    22. ``Y = ssdist(..., "align")``
+
+       Computes a positive alignment distance between the strings
+       using a user specified align matrix. (see `align` function documentation)
+
     23. ``Y = cdist(XA, XB, indptr, f)``
 
        Computes the distance between all pairs of vectors in X
@@ -404,12 +501,12 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
        Euclidean distance between the vectors could be computed
        as follows::
 
-         ssdm = cdist(XA, XB, indptr, lambda u, v: np.sqrt(((u-v)**2).sum()))
+         dm = cdist(XA, XB, indptr, lambda u, v: np.sqrt(((u-v)**2).sum()))
 
        Note that you should avoid passing a reference to one of
        the distance functions defined in this library. For example,::
 
-         ssdm = cdist(XA, XB, indptr, sokalsneath)
+         dm = cdist(XA, XB, indptr, sokalsneath)
 
        would calculate the pair-wise distances between the vectors in
        X using the Python function `sokalsneath`. This would result in
@@ -417,7 +514,7 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
        is inefficient. Instead, the optimized C version is more
        efficient, and we call it using the following syntax::
 
-         ssdm = cdist(XA, XB, indptr, "sokalsneath")
+         dm = cdist(XA, XB, indptr, "sokalsneath")
 
     Examples
     --------
@@ -428,7 +525,7 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
     ...           (35.1174, -89.9711),
     ...           (35.9728, -83.9422),
     ...           (36.1667, -86.7833)]
-    >>> distance.cdist(coords, coords, "euclidean")
+    >>> cdist(coords, coords, "euclidean")
     array([[ 0.    ,  4.7044,  1.6172,  1.8856],
            [ 4.7044,  0.    ,  6.0893,  3.3561],
            [ 1.6172,  6.0893,  0.    ,  2.8477],
@@ -447,7 +544,7 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
     ...               [1, 1, 0],
     ...               [1, 1, 1]])
     >>> b = np.array([[ 0.1,  0.2,  0.4]])
-    >>> distance.cdist(a, b, "cityblock")
+    >>> cdist(a, b, "cityblock")
     array([[ 0.7],
            [ 0.9],
            [ 1.3],
@@ -470,7 +567,6 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
 
     if indicesA is None:
         indicesA = np.arange(XA.shape[0])
-
     if not isinstance(XA, np.ndarray):
         XA = np.asarray(XA, order="C")
     if not isinstance(XB, np.ndarray):
@@ -478,7 +574,7 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
     if not isinstance(indicesB, np.ndarray):
         indicesB = np.asarray(indicesB)
     if not isinstance(indicesA, np.ndarray):
-            indicesA = np.asarray(indicesA)
+        indicesA = np.asarray(indicesA)
     if not isinstance(indptr, np.ndarray):
         indptr = np.asarray(indptr)
 
@@ -502,7 +598,6 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
             raise ValueError("Index pointers must be a 1-dimensional array.")
         if (indptr[-1] != indicesB.shape[0] or
             sindptr[0] != indicesA.shape[0] + 1):
-            print(indptr[-1], indicesB.shape)
             raise ValueError("Index pointer array has incorrect/incompatible "
                              "shape.")
     else:
@@ -516,72 +611,75 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
     mB = indicesB.shape[0]
     n = sA[1]
     if out is None:
-        ssdm = np.zeros(mB, dtype=np.double)
+        dm = np.zeros(mB, dtype=np.double)
     else:
         if not out.flags.contiguous:
-            raise ValueError("Output array must be contiguous.")
+            raise ValueError("Output array must be contiguous")
         if out.shape != (mB,):
-            raise ValueError("Output array has wrong dimension.")
-        ssdm = out
+            raise ValueError("Output array has incorrect shape")
+        if out.dtype != np.double:
+            raise ValueError("Output array must have double dtype")
+        dm = out
 
     # validate input for multi-args metrics
     if(metric in ["minkowski", "mi", "m", "pnorm", "test_minkowski"] or
-       metric == distance.minkowski):
-        p = distance._validate_minkowski_args(p)
+       metric == minkowski):
+        p = _validate_minkowski_args(p)
         _filter_deprecated_kwargs(w=w, V=V, VI=VI, gap_open=gap_open,
-                                  gap_ext=gap_ext, smat=smat,
+                                  gap_ext=gap_ext, mat=mat,
                                   normalized=normalized)
     elif(metric in ["wminkowski", "wmi", "wm", "wpnorm", "test_wminkowski"] or
-         metric == distance.wminkowski):
-        p, w = distance._validate_wminkowski_args(p, w)
+         metric == wminkowski):
+        p, w = _validate_wminkowski_args(p, w)
         _filter_deprecated_kwargs(V=V, VI=VI, gap_open=gap_open,
-                                           gap_ext=gap_ext, smat=smat,
+                                           gap_ext=gap_ext, mat=mat,
                                            normalized=normalized)
     elif(metric in ["seuclidean", "se", "s", "test_seuclidean"] or
-         metric == distance.seuclidean):
-        V = distance._validate_seuclidean_args(np.vstack([XA, XB]), n, V)
+         metric == seuclidean):
+        V = _validate_seuclidean_args(np.vstack([XA, XB]), n, V)
         _filter_deprecated_kwargs(p=p, w=w, VI=VI, gap_open=gap_open,
-                                  gap_ext=gap_ext, smat=smat,
+                                  gap_ext=gap_ext, mat=mat,
                                   normalized=normalized)
     elif(metric in ["mahalanobis", "mahal", "mah", "test_mahalanobis"] or
-         metric == distance.mahalanobis):
-        VI = distance._validate_mahalanobis_args(np.vstack([XA, XB]), mA + mB,
+         metric == mahalanobis):
+        VI = _validate_mahalanobis_args(np.vstack([XA, XB]), mA + mB,
                                                            n, VI)
         _filter_deprecated_kwargs(p=p, w=w, V=V, gap_open=gap_open,
-                                           gap_ext=gap_ext, smat=smat,
+                                           gap_ext=gap_ext, mat=mat,
                                            normalized=normalized)
-    elif(metric in ["blosum", "pam", "blosum62", "pam250"]):
-        gap_open, gap_ext = _validate_preset_align_args(gap_open,
-                                                              gap_ext,
-                                                              normalized)
-        _filter_deprecated_kwargs(p=p, V=V, w=w, VI=VI, smat=smat)
-    elif(metric in ["align", "alignment"]):
-        gap_open, gap_ext. smat = _validate_align_args(gap_open, gap_ext, smat,
-                                                      normalized)
+    elif(metric in ["edit", "levenshtein", "blosum", "pam", "blosum62", "pam250"]
+         or metric in [levenshtein, blosum62, pam250]):
+        gap_open, gap_ext = _validate_alignment_args(gap_open, gap_ext,
+                                                     normalized)
+        _filter_deprecated_kwargs(p=p, V=V, w=w, VI=VI, mat=mat)
+        matrix_dtype = None
+    elif(metric in ["align", "alignment"] or metric == alignment):
+        gap_open, gap_ext = _validate_alignment_args(gap_open, gap_ext,
+                                                     normalized)
+        mat, matrix_dtype = _validate_score_matrix(mat)
         _filter_deprecated_kwargs(p=p, V=V, w=w, VI=VI)
-
     else:
-        _filter_deprecated_kwargs(p=p, w=w, V=V, VI=VI,
-                                           gap_open=gap_open, gap_ext=gap_ext,
-                                           smat=smat)
+        _filter_deprecated_kwargs(p=p, w=w, V=V, VI=VI, gap_open=gap_open,
+                                  gap_ext=gap_ext, mat=mat,
+                                  normalized=normalized)
 
     if callable(metric):
         # metrics that expects only doubles:
-        if metric in [distance.braycurtis, distance.canberra, distance.chebyshev,
-                      distance.cityblock, distance.correlation,
-                      distance.cosine, distance.euclidean, distance.mahalanobis,
-                      distance.minkowski, distance.sqeuclidean,
-                      distance.seuclidean, distance.wminkowski]:
+        if metric in [braycurtis, canberra, chebyshev,
+                      cityblock, correlation,
+                      cosine, euclidean, mahalanobis,
+                      minkowski, sqeuclidean,
+                      seuclidean, wminkowski]:
             XA, indicesA = _convert_to_double(XA)
             XB, indicesB = _convert_to_double(XB)
         # metrics that expects only bools:
-        elif metric in [distance.dice, distance.kulsinski, distance.rogerstanimoto,
-                        distance.russellrao, distance.sokalmichener, distance.sokalsneath,
-                        distance.yule]:
+        elif metric in [dice, kulsinski, rogerstanimoto,
+                        russellrao, sokalmichener, sokalsneath,
+                        yule]:
             XA, indicesA = _convert_to_bool(XA)
             XB, indicesB = _convert_to_bool(XB)
         # metrics that may receive multiple types:
-        elif metric in [distance.matching, distance.hamming, distance.jaccard]:
+        elif metric in [matching, hamming, jaccard]:
             if XA.dtype == bool:
                 XA, indicesA = _convert_to_bool(XA)
                 XB, indicesB = _convert_to_bool(XB)
@@ -590,18 +688,19 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
                 XB, indicesB = _convert_to_double(XB)
 
         # metrics that expects multiple args
-        if metric == distance.minkowski:
-            metric = partial(distance.minkowski, p=p)
-        elif metric == distance.wminkowski:
-            metric = partial(distance.wminkowski, p=p, w=w)
-        elif metric == distance.seuclidean:
-            metric = partial(distance.seuclidean, V=V)
-        elif metric == distance.mahalanobis:
-            metric = partial(distance.mahalanobis, VI=VI)
+        if metric == minkowski:
+            metric = partial(minkowski, p=p)
+        elif metric == wminkowski:
+            metric = partial(wminkowski, p=p, w=w)
+        elif metric == seuclidean:
+            metric = partial(seuclidean, V=V)
+        elif metric == mahalanobis:
+            metric = partial(mahalanobis, VI=VI)
 
-        for i in indicesA:
-            for j in xrange(indptr[i], indptr[i + 1]):
-                ssdm[j] = metric(XA[i, :], XB[indicesB[j], :])
+        for i in range(indicesA.shape[0]):
+            ii = indicesA[i]
+            for j in range(indptr[i], indptr[i + 1]):
+                dm[j] = metric(XA[ii, :], XB[indicesB[j], :])
 
     elif isinstance(metric, string_types):
         mstr = metric.lower()
@@ -610,9 +709,9 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
             validate, ssdist_fn = _SIMPLE_ssdist[mstr]
             XA, indicesA = validate(XA, indicesA)
             XB, indicesB = validate(XB, indicesB)
-            ssdist_fn(XA, XB, indicesA, indicesB, indptr, ssdm)
+            ssdist_fn(XA, XB, indicesA, indicesB, indptr, dm)
             indices = input_indicesB - np.min(input_indicesB)
-            return csr_matrix((ssdm, indices, indptr), copy=False)
+            return csr_matrix((dm, indices, indptr), copy=False)
         except KeyError:
             pass
 
@@ -621,37 +720,37 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
                 XA = _convert_to_bool(XA, indicesA)
                 XB = _convert_to_bool(XB, indicesB)
                 _ssdist_wrap.ssdist_hamming_bool_wrap(XA, XB, indicesA, indicesB,
-                                                    indptr, ssdm)
+                                                    indptr, dm)
             else:
                 XA = _convert_to_double(XA)
                 XB = _convert_to_double(XB)
                 _ssdist_wrap.ssdist_hamming_wrap(XA, XB, indicesA, indicesB,
-                                                 indptr, ssdm)
+                                                 indptr, dm)
         elif mstr in ["jaccard", "jacc", "ja", "j"]:
             if XA.dtype == bool:
                 XA = _convert_to_bool(XA)
                 XB = _convert_to_bool(XB)
-                _ssdist_wrap.ssdist_jaccard_bool_wrap(XA, XB, indicesA, indicesB, indptr, ssdm)
+                _ssdist_wrap.ssdist_jaccard_bool_wrap(XA, XB, indicesA, indicesB, indptr, dm)
             else:
                 XA = _convert_to_double(XA)
                 XB = _convert_to_double(XB)
-                _ssdist_wrap.ssdist_jaccard_wrap(XA, XB, indicesA, indicesB, indptr, ssdm)
+                _ssdist_wrap.ssdist_jaccard_wrap(XA, XB, indicesA, indicesB, indptr, dm)
         elif mstr in ["minkowski", "mi", "m", "pnorm"]:
             XA = _convert_to_double(XA)
             XB = _convert_to_double(XB)
-            _ssdist_wrap.ssdist_minkowski_wrap(XA, XB, indicesA, indicesB, indptr, ssdm, p=p)
+            _ssdist_wrap.ssdist_minkowski_wrap(XA, XB, indicesA, indicesB, indptr, dm, p=p)
         elif mstr in ["wminkowski", "wmi", "wm", "wpnorm"]:
             XA = _convert_to_double(XA)
             XB = _convert_to_double(XB)
-            _ssdist_wrap.ssdist_weighted_minkowski_wrap(XA, XB, indicesA, indicesB, indptr, ssdm, p=p, w=w)
+            _ssdist_wrap.ssdist_weighted_minkowski_wrap(XA, XB, indicesA, indicesB, indptr, dm, p=p, w=w)
         elif mstr in ["seuclidean", "se", "s"]:
             XA = _convert_to_double(XA)
             XB = _convert_to_double(XB)
-            _ssdist_wrap.ssdist_seuclidean_wrap(XA, XB, indicesA, indicesB, indptr, ssdm, V=V)
+            _ssdist_wrap.ssdist_seuclidean_wrap(XA, XB, indicesA, indicesB, indptr, dm, V=V)
         elif mstr in ["cosine", "cos"]:
             XA = _convert_to_double(XA)
             XB = _convert_to_double(XB)
-            _ssdist_cosine(XA, XB, indicesA, indicesB, indptr, ssdm)
+            _ssdist_cosine(XA, XB, indicesA, indicesB, indptr, dm)
         elif mstr in ["correlation", "co"]:
             XA = _convert_to_double(XA)
             XB = _convert_to_double(XB)
@@ -659,74 +758,52 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
             XB, indicesB = _subset_array_if_is_parent(input_XB, XB, indicesB)
             XA -= XA.mean(axis=1)[:, np.newaxis]
             XB -= XB.mean(axis=1)[:, np.newaxis]
-            _ssdist_cosine(XA, XB, indicesA, indicesB, indptr, ssdm)
-        elif mstr in ["simplex", "clr"]:
+            _ssdist_cosine(XA, XB, indicesA, indicesB, indptr, dm)
+        elif mstr in ["aitchison", "simplex", "clr"]:
             XA = _convert_to_double(XA)
             XB = _convert_to_double(XB)
             XA, indicesA = _subset_array_if_is_parent(input_XA, XA, indicesA)
             XB, indicesB = _subset_array_if_is_parent(input_XB, XB, indicesB)
             # check positive
-            if not np.all(XA >= 0):
-                raise ValueError("Values in XA must be greater than or equal to zero.")
-            if not np.all(XB >= 0):
-                raise ValueError("Values in XB must be greater than or equal to zero.")
+            if not (XA >= 0).all():
+                raise ValueError("All values in XA must be greater than or "
+                                 "equal to zero.")
+            if not (XB >= 0).all():
+                raise ValueError("All values in XB must be greater than or "
+                                 "equal to zero.")
             # check normalized
-            normsA = distance._row_norms(XA)
-            normsB = distance._row_norms(XB)
-            if not np.allclose(normsA, 1.):
-                XA /= normsA[:, None]
-            if not np.allclose(normsB, 1.):
-                XB /= normsB[:, None]
-            XA = np.log(XA)
-            XB = np.log(XB)
-            sumsA = np.sum(XA, axis=-1)
-            sumsB = np.sum(XA, axis=-1)
-            XA -= sumsA[:, None]
-            XB -= sumsB[:, None]
-            _ssdist_wrap.ssdist_euclidean(XA, XB, indicesA, indicesB, indptr,
-                                          ssdm)
+            sumA = XA.sum(axis=-1)
+            sumB = XA.sum(axis=-1)
+            if not np.allclose(sumA, 1.):
+                XA /= sumA[:, np.newaxis]
+            if not np.allclose(sumB, 1.):
+                XB /= sumB[:, np.newaxis]
+            XA = np.log(XA, out=XA)
+            XB = np.log(XB, out=XB)
+            XA -= XA.mean(axis=-1)[:, np.newaxis]
+            XB -= XB.mean(axis=-1)[:, np.newaxis]
+            _ssdist_wrap.ssdist_euclidean(XA, XB, indicesA, indicesB, indptr, dm)
         elif mstr in ["mahalanobis", "mahal", "mah"]:
             XA = _convert_to_double(XA)
             XB = _convert_to_double(XB)
             _ssdist_wrap.ssdist_mahalanobis_wrap(XA, XB, indicesA, indicesB,
-                                                 indptr, ssdm, VI=VI)
-        elif mstr in ["blosum", "blosum62"]:
+                                                 indptr, dm, VI=VI)
+        elif mstr in _string_names:
             XA = _convert_to_str(XA)
             XB = _convert_to_str(XB)
-            args = (XA, XB, indicesA, indicesB, indptr, ssdm, gap_open, gap_ext)
-            if normalized:
-                _alignment_wrap.ssdist_normalized_blosum62_wrap(*args)
-            else:
-                _ssdist_wrap.ssdist_blosum_wrap(*args)
-        elif mstr in ["pam", "pam250"]:
-            XA = _convert_to_str(XA)
-            XB = _convert_to_str(XB)
-            args = (XA, XB, indicesA, indicesB, indptr, ssdm, gap_open, gap_ext)
-            if normalized:
-                _alignment_wrap.ssdist_normalized_pam250_wrap(*args)
-            else:
-                _alignment_wrap.ssdist_pam250_wrap(*args)
-        elif mstr in ["edit", "levenshtein"]:
-            XA = _convert_to_str(XA)
-            XB = _convert_to_str(XB)
-            args = (XA, XB, indicesA, indicesB, indptr, ssdm, gap_open, gap_ext)
-            if normalized:
-                _alignment_wrap.ssdist_normalized_levenshtein_wrap(*args)
-            else:
-                _alignment_wrap.ssdist_levenshtein_wrap(*args)
-        elif mstr in ["align", "alignment"]:
-            XA = _convert_to_str(XA)
-            XB = _convert_to_str(XB)
-            args = (XA, XB, indicesA, indicesB, indptr, ssdm, gap_open, gap_ext,
-                    smat)
-            if normalized:
-                _alignment_wrap.ssdist_normalized_alignment_wrap(*args)
-            else:
-                _alignment_wrap.ssdist_alignment_wrap(*args)
+            _validate_string_dtypes(XA, XB, indicesA, indicesB)
+            key = (mstr, normalized, "o" if XA.dtype == np.object_ else "s")
+            if matrix_dtype is not None:
+                key += ({int:"l", float:"d"}[matrix_dtype],)
+            _ssdist_fn = _STRING_ssdist[key]
+            args = (XA, XB, indicesA, indicesB, indptr, dm)
+            kwargs = [gap_open, gap_ext, mat]
+            args += tuple(kwarg for kwarg in kwargs if kwarg is not None)
+            _ssdist_fn(*args)
         elif mstr.startswith("test_"):
             if mstr in _TEST_METRICS:
                 kwargs = {"p":p, "w":w, "V":V, "VI":VI}
-                ssdm = ssdist(XA, XB, indicesB, indicesA, _TEST_METRICS[mstr],
+                dm = ssdist(XA, XB, indicesB, indicesA, _TEST_METRICS[mstr],
                               **kwargs)
             else:
                 raise ValueError("Unknown \"Test\" Distance Metric: %s" % mstr[5:])
@@ -736,4 +813,4 @@ def ssdist(XA, XB, indicesB, indptr, indicesA=None, metric="euclidean", p=None,
         raise TypeError("2nd argument metric must be a string identifier "
                         "or a function.")
     indices = input_indicesB - np.min(input_indicesB)
-    return csr_matrix((ssdm, indices, indptr), copy=False)
+    return csr_matrix((dm, indices, indptr), copy=False)

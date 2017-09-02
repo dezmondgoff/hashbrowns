@@ -117,7 +117,7 @@ from functools import partial
 from scipy._lib.six import callable, string_types
 from scipy._lib.six import xrange
 
-from scipy.spatial.distance import _distance_wrap, _hausdorff
+from scipy.spatial.distance import _distance_wrap, _hausdorff, _row_norms
 from scipy.linalg import norm
 
 def _copy_array_if_base_present(a):
@@ -1135,7 +1135,7 @@ def _cosine_cdist(XA, XB, dm):
     dm += 1
 
 
-def cdist(XA, XB, metric='euclidean', p=None, V=None, VI=None, w=None, 
+def cdist(XA, XB, metric='euclidean', p=None, V=None, VI=None, w=None,
           out=None):
     """
     Computes distance between each pair of the two collections of inputs.
@@ -1445,9 +1445,13 @@ def cdist(XA, XB, metric='euclidean', p=None, V=None, VI=None, w=None,
     if out is None:
         dm = np.zeros((mA, mB), dtype=np.double)
     else:
-      if out.shape != (mA, mB):
-        raise ValueError("Output array has wrong dimension.")
-      dm = out  
+        if out.shape != (mA, mB):
+            raise ValueError("Output array has wrong dimension.")
+        if not out.flags.c_contiguous:
+            raise ValueError("Output array must be C-contiguous.")
+        if out.dtype != np.double:
+            raise ValueError("Output array must be double type.")
+        dm = out
 
     # validate input for multi-args metrics
     if(metric in ['minkowski', 'mi', 'm', 'pnorm', 'test_minkowski'] or

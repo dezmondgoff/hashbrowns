@@ -2,8 +2,7 @@
 index arrays for sampling from ndarray objects
 """
 
-cdef extern from "numpy/npy_no_deprecated_api.h":
-    pass
+cdef extern from "numpy/npy_no_deprecated_api.h": pass
 from numpy cimport npy_intp, npy_uint64, npy_uint32
 from randomkit_wrap cimport RandomStateInterface, rk_state, rk_interval
 from randomkit_wrap cimport rk_random_uint64, rk_random_uint32

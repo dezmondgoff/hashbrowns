@@ -18,6 +18,7 @@ from numpy.distutils.misc_util import get_numpy_include_dirs, get_mathlibs
 from distutils.msvccompiler import get_build_version as get_msvc_build_version
 
 
+# os.environ["CC"] = "g++"
 numpyIncludeDir = get_numpy_include_dirs()
 
 # we'd better have Cython installed, or it's a no-go
@@ -90,11 +91,12 @@ def makeExtension(ext_name, file_ext):
     return Extension(
         ext_name,
         sources=sources,
-        libraries=libs,
+        libraries=libs + ["unistring"],
+        library_dirs=["lib"],
         depends=deps,
         define_macros=defs,
-        include_dirs=numpyIncludeDir + ["."],
-        extra_compile_args=["-O3", "-Wall", "-march=native", "-mfpmath=sse"],
+        include_dirs=numpyIncludeDir + ["include", "."],
+        extra_compile_args=["-O3", "-g", "-Wall", "-march=native", "-mfpmath=sse"],
         extra_link_args=["-g", "-C"],
         )
 

@@ -47,7 +47,43 @@ cdef void c_stable_non_gauss(npy_intp n, double alpha, double beta, double c,
             out[i] += mu
 
 def stable(double alpha, double beta=0, double c=1 , double mu=0, 
-           object shape=None, RandomStateInterface rsi=None):
+           object size=None, RandomStateInterface rsi=None):
+    """
+    Return samples from a stable distriubtion with parameters 
+    
+    Parameters
+    ----------
+    alpha : double on `(0,2]`
+        The stability parameter
+    beta : double on `[-1,1]`
+        The skewness parameter
+        The size of the intervals along the array
+    c : strictly-positive double
+        The scale parameter. Defaults to 1
+    mu : double
+        The location parameter, equal to the mean when `alpha` > 1
+        Defaults to 0.
+    size : int or tuple of ints
+        Desired size of output array
+    rsi : optional, RandomStateInterface
+        A Cython interface to a Numpy random number generator 
+        Defaults: and interface to RandomState generated on import of np.random
+    
+    Returns
+    -------
+    out : ndarray
+        An array of doubles
+    
+    Raises
+    ------
+    ValueError
+        If `alpha` is not on `(0,2]`.
+    ValueError
+        If `beta` is not on `[-1,1]`.
+    ValueError
+        If `c` <= 0
+    """
+    cdef npy_intp n
     cdef double scalar
     cdef double[::1] out 
     cdef rk_state * state
@@ -63,20 +99,20 @@ def stable(double alpha, double beta=0, double c=1 , double mu=0,
     if c <= 0:
         raise ValueError("Scale parameter must be greater than zero.")
     if alpha == 2:
-        return np.random.normal(mu, c**2, shape=shape)
+        return np.random.normal(mu, c**2, size=size)
     
     with rsi.lock:
         rsi.retreive_state()
         
-        if shape is None or shape == 1:
+        if size is None or size == 1:
             c_stable_non_gauss(1, alpha, beta, c, mu, &scalar, state)
         else:
-            n = np.prod(shape)
+            n = np.prod(size)
             out = np.empty(n, dtype=np.double)
             c_stable_non_gauss(n, alpha, beta, c, mu, &out[0], state)
         
         rsi.return_state()
     
-    if shape is None or shape == 1:
+    if size is None or size == 1:
         return scalar
-    return np.asarray(out).reshape(shape)
+    return np.asarray(out).reshape(size)

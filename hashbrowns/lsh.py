@@ -12,13 +12,9 @@ from warnings import warn
 from sortedcontainers.sortedlist import SortedList
 from .distance.distance_wrapped import _metric_names, cdist_wrapped
 from .distance.distance_wrapped import ssdist_wrapped
-from .random.sample import sample_intervals
-from .storage import storage
-from .random.stable import random_stable
-from .helpers.bitarray import bitdot
-from .helpers.encode import encode_by_bits, encode_by_place
-from .helpers.hash_argmin import hash_argmin
-from .helpers.rank import rank
+from storage import storage
+from _random import sample_intervals, stable
+from _helpers import hash_argmin, encode_by_bits, encode_by_place, rank, bitdot
 
 import tblib.pickling_support
 tblib.pickling_support.install()
