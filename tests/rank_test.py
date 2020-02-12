@@ -3,7 +3,7 @@ import unittest
 
 from locality.helpers.rank import rank
 
-class Rank_Tests(uniittest.TestCase):
+class Rank_Tests(unittest.TestCase):
 
     def main_test(self):
         q = 5
